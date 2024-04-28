@@ -1,0 +1,265 @@
+---
+title: "Bayesian Insights into Diabetes"
+author: "Aazar and Nadia"
+date: "2024-04-28"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo= FALSE}
+# Loading in data
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+diabetes <- read_csv("~/Downloads/diabetes_prediction_dataset.csv")
+diabetes$hypertension <- factor(diabetes$hypertension, levels = c(0, 1))
+diabetes$heart_disease <- factor(diabetes$heart_disease, levels = c(0, 1))
+diabetes$gender <- factor(diabetes$gender, levels = c(0, 1))
+diabetes$smoking_history <- factor(diabetes$smoking_history, levels = c("current", "ever", "former", "never", "No Info", "not current"))
+diabetes$diabetes <- factor(diabetes$diabetes, levels = c(0, 1))
+
+```
+# What is in this dataset ?
+```{r}
+diabetes %>%
+  kbl() %>%
+  kable_paper() %>%
+  scroll_box(height = "300px")
+```
+
+
+
+# Beta Binomial Model (lecture 7)
+The analysis revealed a 95% credible interval for the posterior distribution of theta, the proportion of patients with diabetes among those with hypertension, ranging from approximately 0.269 to 0.289. Additionally, the sample proportion of patients with both conditions was estimated to be approximately 0.279. Furthermore, the posterior mean estimate of the proportion of patients with diabetes among those with hypertension was found to be approximately 0.279.
+```{r}
+library(ggplot2)
+# Counting the number of patients with hypertension and diabetes
+data_summary <- table(diabetes$hypertension, diabetes$diabetes)
+n = sum(data_summary["1", ])  # Total patients with hypertension
+x = data_summary["1", "1"]    # Patients with hypertension and diabetes
+
+theta =seq(0,1,0.0001)
+alpha_prior = 3
+beta_prior = 1
+prior = dbeta(theta, alpha_prior, beta_prior)
+likelihood = dbinom(x, n, theta)
+# posterior
+alpha_post = alpha_prior + x
+beta_post = beta_prior + n 
+#posterior = dbeta(theta, alpha_post, beta_post)
+# posterior credible interval
+qbeta(c(0.025, 0.975), alpha_post, beta_post)
+
+paste("The sample proportion is: ", x/n)
+paste("The posterior mean : ",(x+alpha_prior+beta_prior)/ (n+alpha_prior+beta_prior))
+```
+
+Lecture 11
+Non Diabetic Gluclose Levels
+```{r}
+data_nd <- filter(diabetes, diabetes == 0)  # Assuming '0' indicates non-diabetic
+tau0 = 2
+mu0 = 100
+
+n=  nrow(data_nd)
+sigma= sd(data_nd$blood_glucose_level) 
+
+xbar= mean(data_nd$blood_glucose_level)
+#posterior SD
+tau_n = 1 / sqrt(n / sigma ^ 2 + 1 / tau0 ^ 2)
+#posterior mean
+mu_n =  mu0 * (1 / tau0 ^ 2) / (1 / tau_n ^ 2) + xbar * (n / sigma ^ 2) / (1 / tau_n ^ 2)
+theta = seq(mu0 - 3 * tau0, mu0 + 3 * tau0, 0.01) # for plotting
+# prior
+prior = dnorm(theta, mu0, tau0)
+# likelihood
+likelihood = dnorm(xbar, theta, sigma / sqrt(n))
+# posterior
+posterior = dnorm(theta, mu_n, tau_n)
+
+# plot
+ymax = max(c(prior, posterior))
+scaled_likelihood = likelihood * ymax / max(likelihood)
+
+plot(theta, prior, type='l', col='red', xlim= range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
+par(new=T)
+plot(theta, scaled_likelihood, type='l', col='blue', xlim=range(theta), ylim=c(0, ymax), ylab='',  yaxt='n',lwd=3, frame.plot = FALSE)
+par(new=T)
+plot(theta, posterior, type='l', col='seagreen', xlim=range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
+legend("topleft", c("prior", "scaled likelihood", "posterior"), lty=1, col=c("red", " blue", "green"),lwd=3,  bty = "n")
+
+
+## --------------------------------
+qnorm(c(0.025,0.975), 132.8506, .1132148)
+
+
+##
+library(rjags)
+Nrep = 10000
+Nchains = 3
+
+# data
+# data has already been loaded in previous code
+
+# model
+model_string <- "model{
+
+  # Likelihood
+  for (i in 1:n){
+    x[i] ~ dnorm(theta, 1 / sigma ^ 2)
+  }
+  sigma <- 34.24728
+  
+  #OR simply dnorm(theta, n / sigma ^ 2)
+  
+
+  # Prior
+  theta ~ dnorm(mu0, 1 / tau0 ^ 2)
+  mu0 <- 100  
+  tau0 <- 2
+
+}"
+
+# Compile the model
+dataList = list(x=x, n=n)
+
+model <- jags.model(textConnection(model_string), 
+                    data=dataList,
+                    n.chains=Nchains)
+
+
+## --------------------------------
+update(model, 1000, progress.bar="none")
+
+posterior_sample <- coda.samples(model, 
+                                 variable.names=c("theta"),
+                                 n.iter=Nrep,
+                                 progress.bar="none")
+# Summarize and check diagnostics
+summary(posterior_sample)
+
+
+## --------------------------------
+plot(posterior_sample)
+
+
+theta_sim = rnorm(100000, mu_n, tau_n)
+x_sim = rnorm(100000, theta_sim, sigma)
+hist(x_sim, freq = FALSE, breaks = 30,
+xlab = "non-diabetic Blood Gluclose Levels",
+main = "Posterior predictive distribution")
+quantile(x_sim, c(0.025, 0.975))
+
+
+
+
+(sum(x < quantile(x_sim, 0.025)) + sum(x > quantile(x_sim, 0.975))) / n
+
+```
+
+Non- Diabetic Gluclose Levels 
+```{r}
+data_nd <- filter(diabetes, diabetes == 1)  
+tau0 = 10
+mu0 = 160
+
+n=  nrow(data_nd)
+sigma= sd(data_nd$blood_glucose_level) 
+sigma
+xbar= mean(data_nd$blood_glucose_level)
+#posterior SD
+tau_n = 1 / sqrt(n / sigma ^ 2 + 1 / tau0 ^ 2)
+#posterior mean
+mu_n =  mu0 * (1 / tau0 ^ 2) / (1 / tau_n ^ 2) + xbar * (n / sigma ^ 2) / (1 / tau_n ^ 2)
+theta = seq(mu0 - 3 * tau0, mu0 + 3 * tau0, 0.01) # for plotting
+# prior
+prior = dnorm(theta, mu0, tau0)
+# likelihood
+likelihood = dnorm(xbar, theta, sigma / sqrt(n))
+# posterior
+posterior = dnorm(theta, mu_n, tau_n)
+
+# plot
+ymax = max(c(prior, posterior))
+scaled_likelihood = likelihood * ymax / max(likelihood)
+
+plot(theta, prior, type='l', col='red', xlim= range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
+par(new=T)
+plot(theta, scaled_likelihood, type='l', col='blue', xlim=range(theta), ylim=c(0, ymax), ylab='',  yaxt='n',lwd=3, frame.plot = FALSE)
+par(new=T)
+plot(theta, posterior, type='l', col='seagreen', xlim=range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
+legend("topleft", c("prior", "scaled likelihood", "posterior"), lty=1, col=c("red", " blue", "green"),lwd=3,  bty = "n")
+
+
+## --------------------------------
+qnorm(c(0.025,0.975), 132.8506, .1132148)
+
+
+##
+library(rjags)
+Nrep = 10000
+Nchains = 3
+
+# data
+# data has already been loaded in previous code
+
+# model
+model_string <- "model{
+
+  # Likelihood
+  for (i in 1:n){
+    x[i] ~ dnorm(theta, 1 / sigma ^ 2)
+  }
+  sigma <- 58.64111
+  
+  #OR simply dnorm(theta, n / sigma ^ 2)
+  
+
+  # Prior
+  theta ~ dnorm(mu0, 1 / tau0 ^ 2)
+  mu0 <- 160  
+  tau0 <- 10
+
+}"
+
+# Compile the model
+dataList = list(x=x, n=n)
+
+model <- jags.model(textConnection(model_string), 
+                    data=dataList,
+                    n.chains=Nchains)
+
+
+## --------------------------------
+update(model, 1000, progress.bar="none")
+
+posterior_sample <- coda.samples(model, 
+                                 variable.names=c("theta"),
+                                 n.iter=Nrep,
+                                 progress.bar="none")
+# Summarize and check diagnostics
+summary(posterior_sample)
+
+
+## --------------------------------
+plot(posterior_sample)
+
+
+theta_sim = rnorm(100000, mu_n, tau_n)
+x_sim = rnorm(100000, theta_sim, sigma)
+hist(x_sim, freq = FALSE, breaks = 30,
+xlab = "non-diabetic Blood Gluclose Levels",
+main = "Posterior predictive distribution")
+quantile(x_sim, c(0.025, 0.975))
+
+
+(sum(x < quantile(x_sim, 0.025)) + sum(x > quantile(x_sim, 0.975))) / n
+```
+
+
+
+
+
