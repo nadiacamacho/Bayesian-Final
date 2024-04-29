@@ -1,0 +1,3 @@
++ Creating a new column named "BMI Category" based on the BMI column.
++ See if you find any null values in bmi column and drop them beacuse the dataset is already quite large.
++ I will read relevant lecture codes and upload before wednesday.
