@@ -14,17 +14,32 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(dplyr)
 library(kableExtra)
+
+diabetes <- read_csv("diabetes_prediction_dataset.csv")
+
+diabetes <- diabetes %>%
+  mutate(weight_status = case_when(
+    bmi < 18.5 ~ "Underweight",
+    bmi >= 18.5 & bmi < 25 ~ "Healthy Weight",
+    bmi >= 25 & bmi < 30 ~ "Overweight",
+    bmi >= 30  ~ "Obesity"
+  ))
+
+# Because there is a column with the new bmi categories, I'm unsure if we still want to keep the bmi values
+# diabetes <- diabetes %>% 
+#   select(-bmi)
+
 diabetes <- read_csv("~/Downloads/diabetes_prediction_dataset.csv")
 diabetes$hypertension <- factor(diabetes$hypertension, levels = c(0, 1))
 diabetes$heart_disease <- factor(diabetes$heart_disease, levels = c(0, 1))
-diabetes$gender <- factor(diabetes$gender, levels = c(0, 1))
 diabetes$smoking_history <- factor(diabetes$smoking_history, levels = c("current", "ever", "former", "never", "No Info", "not current"))
 diabetes$diabetes <- factor(diabetes$diabetes, levels = c(0, 1))
 
 ```
 # What is in this dataset ?
 ```{r}
-diabetes %>%
+#Neatly presents table
+head(diabetes,10) %>%
   kbl() %>%
   kable_paper() %>%
   scroll_box(height = "300px")
@@ -58,21 +73,34 @@ paste("The posterior mean : ",(x+alpha_prior+beta_prior)/ (n+alpha_prior+beta_pr
 ```
 
 Lecture 11
-Non Diabetic Gluclose Levels
+Diabetic Gluclose Levels
 ```{r}
-data_nd <- filter(diabetes, diabetes == 0)  # Assuming '0' indicates non-diabetic
-tau0 = 2
-mu0 = 100
+library(rjags)
+library(coda)
 
-n=  nrow(data_nd)
-sigma= sd(data_nd$blood_glucose_level) 
+set.seed(3153)
+tau0 = 10 
+mu0 = 180
 
-xbar= mean(data_nd$blood_glucose_level)
+diabetic <- diabetes %>% 
+  filter(diabetes == 1)
+
+#data 
+n= nrow(diabetic) 
+sigma= sd(diabetic$blood_glucose_level) 
+xbar= mean(diabetic$blood_glucose_level)
+
+x <- rnorm(n, xbar, sigma)
 #posterior SD
 tau_n = 1 / sqrt(n / sigma ^ 2 + 1 / tau0 ^ 2)
+#  0.6347694
+
+tau_n
 #posterior mean
-mu_n =  mu0 * (1 / tau0 ^ 2) / (1 / tau_n ^ 2) + xbar * (n / sigma ^ 2) / (1 / tau_n ^ 2)
-theta = seq(mu0 - 3 * tau0, mu0 + 3 * tau0, 0.01) # for plotting
+mu_n = mu0 * (1 / tau0 ^ 2) / (1 / tau_n ^ 2) + xbar * (n / sigma ^ 2) / (1 / tau_n ^ 2)
+theta = seq(mu0 - 3 * tau0, mu0 + 3 * tau0, 0.01) # the grid is just for plotting
+# 194.0379
+
 # prior
 prior = dnorm(theta, mu0, tau0)
 # likelihood
@@ -91,114 +119,10 @@ par(new=T)
 plot(theta, posterior, type='l', col='seagreen', xlim=range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
 legend("topleft", c("prior", "scaled likelihood", "posterior"), lty=1, col=c("red", " blue", "green"),lwd=3,  bty = "n")
 
-
-## --------------------------------
-qnorm(c(0.025,0.975), 132.8506, .1132148)
-
-
-##
-library(rjags)
-Nrep = 10000
-Nchains = 3
-
-# data
-# data has already been loaded in previous code
-
-# model
-model_string <- "model{
-
-  # Likelihood
-  for (i in 1:n){
-    x[i] ~ dnorm(theta, 1 / sigma ^ 2)
-  }
-  sigma <- 34.24728
-  
-  #OR simply dnorm(theta, n / sigma ^ 2)
-  
-
-  # Prior
-  theta ~ dnorm(mu0, 1 / tau0 ^ 2)
-  mu0 <- 100  
-  tau0 <- 2
-
-}"
-
-# Compile the model
-dataList = list(x=x, n=n)
-
-model <- jags.model(textConnection(model_string), 
-                    data=dataList,
-                    n.chains=Nchains)
-
-
-## --------------------------------
-update(model, 1000, progress.bar="none")
-
-posterior_sample <- coda.samples(model, 
-                                 variable.names=c("theta"),
-                                 n.iter=Nrep,
-                                 progress.bar="none")
-# Summarize and check diagnostics
-summary(posterior_sample)
-
-
-## --------------------------------
-plot(posterior_sample)
-
-
-theta_sim = rnorm(100000, mu_n, tau_n)
-x_sim = rnorm(100000, theta_sim, sigma)
-hist(x_sim, freq = FALSE, breaks = 30,
-xlab = "non-diabetic Blood Gluclose Levels",
-main = "Posterior predictive distribution")
-quantile(x_sim, c(0.025, 0.975))
-
-
-
-
-(sum(x < quantile(x_sim, 0.025)) + sum(x > quantile(x_sim, 0.975))) / n
-
+qnorm(c(0.025,0.975), 194.0379,  0.6347694) # Postereior Mean
 ```
 
-Non- Diabetic Gluclose Levels 
 ```{r}
-data_nd <- filter(diabetes, diabetes == 1)  
-tau0 = 10
-mu0 = 160
-
-n=  nrow(data_nd)
-sigma= sd(data_nd$blood_glucose_level) 
-sigma
-xbar= mean(data_nd$blood_glucose_level)
-#posterior SD
-tau_n = 1 / sqrt(n / sigma ^ 2 + 1 / tau0 ^ 2)
-#posterior mean
-mu_n =  mu0 * (1 / tau0 ^ 2) / (1 / tau_n ^ 2) + xbar * (n / sigma ^ 2) / (1 / tau_n ^ 2)
-theta = seq(mu0 - 3 * tau0, mu0 + 3 * tau0, 0.01) # for plotting
-# prior
-prior = dnorm(theta, mu0, tau0)
-# likelihood
-likelihood = dnorm(xbar, theta, sigma / sqrt(n))
-# posterior
-posterior = dnorm(theta, mu_n, tau_n)
-
-# plot
-ymax = max(c(prior, posterior))
-scaled_likelihood = likelihood * ymax / max(likelihood)
-
-plot(theta, prior, type='l', col='red', xlim= range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
-par(new=T)
-plot(theta, scaled_likelihood, type='l', col='blue', xlim=range(theta), ylim=c(0, ymax), ylab='',  yaxt='n',lwd=3, frame.plot = FALSE)
-par(new=T)
-plot(theta, posterior, type='l', col='seagreen', xlim=range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
-legend("topleft", c("prior", "scaled likelihood", "posterior"), lty=1, col=c("red", " blue", "green"),lwd=3,  bty = "n")
-
-
-## --------------------------------
-qnorm(c(0.025,0.975), 132.8506, .1132148)
-
-
-##
 library(rjags)
 Nrep = 10000
 Nchains = 3
@@ -213,14 +137,14 @@ model_string <- "model{
   for (i in 1:n){
     x[i] ~ dnorm(theta, 1 / sigma ^ 2)
   }
-  sigma <- 58.64111
+  sigma <-   58.64111
   
   #OR simply dnorm(theta, n / sigma ^ 2)
   
 
   # Prior
   theta ~ dnorm(mu0, 1 / tau0 ^ 2)
-  mu0 <- 160  
+  mu0 <- 150
   tau0 <- 10
 
 }"
@@ -248,18 +172,137 @@ summary(posterior_sample)
 plot(posterior_sample)
 
 
+## ---- fig.height=3---------------
 theta_sim = rnorm(100000, mu_n, tau_n)
 x_sim = rnorm(100000, theta_sim, sigma)
 hist(x_sim, freq = FALSE, breaks = 30,
-xlab = "non-diabetic Blood Gluclose Levels",
-main = "Posterior predictive distribution")
+ xlab = "diabetic Blood Glucose Level",
+ main = "Posterior predictive distribution")
+
+
+## --------------------------------
 quantile(x_sim, c(0.025, 0.975))
 
 
+## --------------------------------
 (sum(x < quantile(x_sim, 0.025)) + sum(x > quantile(x_sim, 0.975))) / n
+
 ```
 
+Non- Diabetic Gluclose Levels 
+
+```{r}
+library(rjags)
+library(coda)
+
+set.seed(3153)
+tau0 = 10 
+mu0 = 100
+
+non_diabetic <- diabetes %>% 
+  filter(diabetes == 0)
+
+#data 
+n= nrow(non_diabetic) 
+sigma= sd(non_diabetic$blood_glucose_level) 
+xbar= mean(non_diabetic$blood_glucose_level)
+
+x <- rnorm(n, xbar, sigma)
+#posterior SD
+tau_n = 1 / sqrt(n / sigma ^ 2 + 1 / tau0 ^ 2)
+#  0.1132108
+tau_n
+#posterior mean
+mu_n = mu0 * (1 / tau0 ^ 2) / (1 / tau_n ^ 2) + xbar * (n / sigma ^ 2) / (1 / tau_n ^ 2)
+theta = seq(mu0 - 3 * tau0, mu0 + 3 * tau0, 0.01) # the grid is just for plotting
+ # 132.8483
+
+# prior
+prior = dnorm(theta, mu0, tau0)
+# likelihood
+likelihood = dnorm(xbar, theta, sigma / sqrt(n))
+# posterior
+posterior = dnorm(theta, mu_n, tau_n)
+
+# plot
+ymax = max(c(prior, posterior))
+scaled_likelihood = likelihood * ymax / max(likelihood)
+
+plot(theta, prior, type='l', col='red', xlim= range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
+par(new=T)
+plot(theta, scaled_likelihood, type='l', col='blue', xlim=range(theta), ylim=c(0, ymax), ylab='',  yaxt='n',lwd=3, frame.plot = FALSE)
+par(new=T)
+plot(theta, posterior, type='l', col='seagreen', xlim=range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
+legend("topleft", c("prior", "scaled likelihood", "posterior"), lty=1, col=c("red", " blue", "green"),lwd=3,  bty = "n")
+
+qnorm(c(0.025,0.975), 132.8483, .1132108)
+```
+
+```{r}
+library(rjags)
+Nrep = 10000
+Nchains = 3
+
+# data
+# data has already been loaded in previous code
+
+# model
+model_string <- "model{
+
+  # Likelihood
+  for (i in 1:n){
+    x[i] ~ dnorm(theta, 1 / sigma ^ 2)
+  }
+  sigma <-  34.24728
+  
+  #OR simply dnorm(theta, n / sigma ^ 2)
+  
+
+  # Prior
+  theta ~ dnorm(mu0, 1 / tau0 ^ 2)
+  mu0 <- 100  
+  tau0 <- 10
+
+}"
+
+# Compile the model
+dataList = list(x=x, n=n)
+
+model <- jags.model(textConnection(model_string), 
+                    data=dataList,
+                    n.chains=Nchains)
 
 
+## --------------------------------
+update(model, 1000, progress.bar="none")
 
+posterior_sample <- coda.samples(model, 
+                                 variable.names=c("theta"),
+                                 n.iter=Nrep,
+                                 progress.bar="none")
+# Summarize and check diagnostics
+summary(posterior_sample)
+
+
+## --------------------------------
+plot(posterior_sample)
+
+
+## ---- fig.height=3---------------
+theta_sim = rnorm(100000, mu_n, tau_n)
+x_sim = rnorm(100000, theta_sim, sigma)
+hist(x_sim, freq = FALSE, breaks = 30,
+ xlab = "Non-diabetic Blood Glucose Level",
+ main = "Posterior predictive distribution")
+
+
+## --------------------------------
+quantile(x_sim, c(0.025, 0.975))
+
+
+## --------------------------------
+(sum(x < quantile(x_sim, 0.025)) + sum(x > quantile(x_sim, 0.975))) / n
+
+
+```
 
