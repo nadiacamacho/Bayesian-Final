@@ -1,0 +1,82 @@
+---
+title: "Analysis"
+author: "Aazar and Nadia"
+date: "2024-05-01"
+output: pdf_document
+---
+
+
+
+```{r}
+library('dplyr')
+data = read.csv("diabetes_prediction_dataset.csv")
+data <- data %>%
+  mutate(weight_status = case_when(
+    bmi < 18.5 ~ "Underweight",
+    bmi >= 18.5 & bmi < 25 ~ "Healthy Weight",
+    bmi >= 25 & bmi < 30 ~ "Overweight",
+    bmi >= 30  ~ "Obesity"
+  ))
+head(data)
+```
+
+
+# We use a Beta-Binomial Model
+
++ The choice of alpha and beta is 3 because our prior belief is that theta is 0.5 for all the groups. A randomly chosen person, regardless of any group has a 50 percent chance of having diabetes. 
+```{r}
+categories = c('Overweight','Obesity', 'Healthy Weight', 'Underweight')
+
+# Create an empty plot
+plot(NULL, NULL, xlim=c(0, 0.25), ylim=c(0, 500), xlab="Theta", ylab="Posterior of theta given x", main="Posterior Distributions by Weight Status", type="n")
+
+for (category in categories){
+  diabetesunder <- data %>%
+    filter(weight_status == category)
+  
+  data_summary <- table(diabetesunder$weight_status, diabetesunder$diabetes)
+  n = sum(data_summary[category, ]) # Total patients underweight
+  x = data_summary[category, "1"] 
+  
+  set.seed(202289)
+  
+  alpha_prior = 3; beta_prior = 3; 
+  theta =seq(0,1,0.00001)
+  
+  prior = dbeta(theta, alpha_prior, beta_prior)
+  
+  # likelihood
+  likelihood = dbinom(x, n, theta)
+  
+  # posterior
+  alpha_post = alpha_prior + x
+  beta_post = beta_prior + n - x
+  
+  # Plot posterior distribution for each category
+  lines(theta, dbeta(theta, shape1=alpha_post, shape2=beta_post), col=rainbow(length(categories))[which(categories == category)], lty=1)
+  
+  cat( category,": ", qbeta(c(0.025, 0.975), alpha_post, beta_post) , "\n")
+  
+}
+
+# Add legend
+legend("topright", legend=categories, col=rainbow(length(categories)), lty=1, cex=0.8)
+```
+
+
+** Now that we have generated the posterior distributions, it is time to look at the data and see how close the evidence is to the posterior distributions. 
+```{r}
+data %>%
+  group_by(weight_status) %>%
+  summarize(
+    sum_diabetes = sum(diabetes, na.rm = TRUE),
+    percent_diabetic = round((sum_diabetes / n()) * 100,2)
+  ) %>%
+  arrange(desc(sum_diabetes))
+```
+
+
++ Since we have a good amount of data, the data plays an overwhelmingly bigger role in determining the posterior distribution.
+
+
+
