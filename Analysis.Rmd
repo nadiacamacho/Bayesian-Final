@@ -2,10 +2,325 @@
 title: "Analysis"
 author: "Aazar and Nadia"
 date: "2024-05-01"
-output: pdf_document
+output: slidy_presentation
 ---
 
 
+```{r, echo= FALSE, message=FALSE}
+# Loading in data
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+
+diabetes <- read_csv("~/Downloads/diabetes_prediction_dataset.csv")
+
+diabetes <- diabetes %>%
+  mutate(weight_status = case_when(
+    bmi < 18.5 ~ "Underweight",
+    bmi >= 18.5 & bmi < 25 ~ "Healthy Weight",
+    bmi >= 25 & bmi < 30 ~ "Overweight",
+    bmi >= 30  ~ "Obesity"
+  ))
+
+# Because there is a column with the new bmi categories, I'm unsure if we still want to keep the bmi values
+# diabetes <- diabetes %>% 
+#   select(-bmi)
+
+diabetes$hypertension <- factor(diabetes$hypertension, levels = c(0, 1))
+diabetes$heart_disease <- factor(diabetes$heart_disease, levels = c(0, 1))
+diabetes$smoking_history <- factor(diabetes$smoking_history, levels = c("current", "ever", "former", "never", "No Info", "not current"))
+diabetes$diabetes <- factor(diabetes$diabetes, levels = c(0, 1))
+
+table(diabetes$weight_status)
+```
+
+
+
+# What is in this dataset ?
+```{r}
+#Neatly presents table
+head(diabetes,10) %>%
+  kbl() %>%
+  kable_paper() %>%
+  scroll_box(height = "300px")
+```
+
+# Beta Binomial Model (lecture 7)
+The analysis revealed a 95% credible interval for the posterior distribution of theta, the proportion of patients with diabetes among those with hypertension, ranging from approximately 0.269 to 0.289. Additionally, the sample proportion of patients with both conditions was estimated to be approximately 0.279. Furthermore, the posterior mean estimate of the proportion of patients with diabetes among those with hypertension was found to be approximately 0.279.
+```{r}
+library(ggplot2)
+# Counting the number of patients with hypertension and diabetes
+data_summary <- table(diabetes$hypertension, diabetes$diabetes)
+n = sum(data_summary["1", ])  # Total patients with hypertension
+x = data_summary["1", "1"]    # Patients with hypertension and diabetes
+
+theta =seq(0,1,0.0001)
+alpha_prior = 3
+beta_prior = 1
+prior = dbeta(theta, alpha_prior, beta_prior)
+likelihood = dbinom(x, n, theta)
+# posterior
+alpha_post = alpha_prior + x
+beta_post = beta_prior + n 
+#posterior = dbeta(theta, alpha_post, beta_post)
+# posterior credible interval
+qbeta(c(0.025, 0.975), alpha_post, beta_post)
+
+
+# Plot posterior distribution for each category
+plot(NULL, NULL, xlim=c(0, 0.25), ylim=c(0, 100), xlab="Theta", ylab="Posterior of theta given x", main="Posterior Distribution", type="n")
+
+lines(theta, dbeta(theta, shape1=alpha_post, shape2=beta_post))
+
+
+paste("The sample proportion is: ", x/n)
+```
+
+# Diabetic Gluclose Levels
+We’re reasonably confident that the average glucose level lies in the range of 170 to 190 mg/dL. Our prior probability that the average glucose level is between 170 mg/dL and 190 mg/dL is about 68%. Our prior probability that the average glucose level is between 160 mg/dL and 200 mg/dL is about 95%.
+```{r}
+library(rjags)
+library(coda)
+
+set.seed(3153)
+tau0 = 10 
+mu0 = 180
+
+diabetic <- diabetes %>% 
+  filter(diabetes == 1)
+sigma
+#data 
+n= nrow(diabetic) 
+sigma= sd(diabetic$blood_glucose_level) 
+xbar= mean(diabetic$blood_glucose_level)
+
+x = diabetic$blood_glucose_level
+#posterior SD
+tau_n = 1 / sqrt(n / sigma ^ 2 + 1 / tau0 ^ 2)
+#  0.6347694
+tau_n
+tau_n
+#posterior mean
+mu_n = mu0 * (1 / tau0 ^ 2) / (1 / tau_n ^ 2) + xbar * (n / sigma ^ 2) / (1 / tau_n ^ 2)
+theta = seq(mu0 - 3 * tau0, mu0 + 3 * tau0, 0.01) # the grid is just for plotting
+# 194.0379
+mu_n
+# prior
+prior = dnorm(theta, mu0, tau0)
+# likelihood
+likelihood = dnorm(xbar, theta, sigma / sqrt(n))
+# posterior
+posterior = dnorm(theta, mu_n, tau_n)
+# plot
+ymax = max(c(prior, posterior))
+scaled_likelihood = likelihood * ymax / max(likelihood)
+
+plot(theta, prior, type='l', col='red', xlim= range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
+par(new=T)
+plot(theta, scaled_likelihood, type='l', col='blue', xlim=range(theta), ylim=c(0, ymax), ylab='',  yaxt='n',lwd=3, frame.plot = FALSE)
+par(new=T)
+plot(theta, posterior, type='l', col='seagreen', xlim=range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
+legend("topleft", c("prior", "scaled likelihood", "posterior"), lty=1, col=c("red", " blue", "green"),lwd=3,  bty = "n")
+```
+# There is a 95% posterior probability that the true mean glucose level for the diabetic population falls between 192.794 mg/dL and 195.282 mg/dL.
+```{r}
+qnorm(c(0.025,0.975), 194.0379,  0.6347694) # Postereior Mean
+```
+
+# 
+```{r}
+library(rjags)
+Nrep = 10000
+Nchains = 3
+
+# data
+# data has already been loaded in previous code
+
+# model
+model_string <- "model{
+
+  # Likelihood
+  for (i in 1:n){
+    x[i] ~ dnorm(theta, 1 / sigma ^ 2)
+  }
+  sigma <-   58.64111
+  
+  #OR simply dnorm(theta, n / sigma ^ 2)
+  
+
+  # Prior
+  theta ~ dnorm(mu0, 1 / tau0 ^ 2)
+  mu0 <- 180
+  tau0 <- 10
+
+}"
+
+# Compile the model
+dataList = list(x=x, n=n)
+
+model <- jags.model(textConnection(model_string), 
+                    data=dataList,
+                    n.chains=Nchains)
+
+
+## --------------------------------
+update(model, 1000, progress.bar="none")
+
+posterior_sample <- coda.samples(model, 
+                                 variable.names=c("theta"),
+                                 n.iter=Nrep,
+                                 progress.bar="none")
+# Summarize and check diagnostics
+summary(posterior_sample)
+
+
+## --------------------------------
+plot(posterior_sample)
+```
+
+# 
+```{r}
+## ---- fig.height=3---------------
+theta_sim = rnorm(100000, mu_n, tau_n)
+x_sim = rnorm(100000, theta_sim, sigma)
+hist(x_sim, freq = FALSE, breaks = 30,
+ xlab = "Diabetic Blood Glucose Level",
+ main = "Posterior predictive distribution")
+```
+
+#
+This interval suggests that we are 95% confident that the glucose levels of a diabetic will fall between 79.2 and 308.2 mg/dL. This range captures the variability in glucose levels that can be expected among individuals with diabetes, from fairly low levels that are near normal to significantly elevated levels that indicate poor glucose control.
+```{r}
+## --------------------------------
+quantile(x_sim, c(0.025, 0.975))
+#    2.5%    97.5% 
+# 79.1999 308.1716 
+
+## --------------------------------
+(sum(x < quantile(x_sim, 0.025)) + sum(x > quantile(x_sim, 0.975))) / n
+
+```
+
+# Non-Diabetic Gluclose Levels 
+```{r}
+library(rjags)
+library(coda)
+
+set.seed(3153)
+tau0 = 10 
+mu0 = 100
+
+non_diabetic <- diabetes %>% 
+  filter(diabetes == 0)
+
+#data 
+n= nrow(non_diabetic) 
+sigma= sd(non_diabetic$blood_glucose_level) 
+xbar= mean(non_diabetic$blood_glucose_level)
+sigma
+x <- non_diabetic$blood_glucose_level
+#posterior SD
+tau_n = 1 / sqrt(n / sigma^2 + 1 / tau0^2)
+theta = seq(mu0 - 3 * tau0, mu0 + 3 * tau0, 0.01) # the grid is just for plotting
+#  0.1132108
+tau_n
+#posterior mean
+
+mu_n = mu0 * (1 / tau0 ^ 2) / (1 / tau_n ^ 2) + xbar * (n / sigma ^ 2) / (1 / tau_n ^ 2)
+
+ # 132.8483
+
+# prior
+prior = dnorm(theta, mu0, tau0)
+# likelihood
+likelihood = dnorm(xbar, theta, sigma / sqrt(n))
+# posterior
+posterior = dnorm(theta, mu_n, tau_n)
+
+# plot
+ymax = max(c(prior, posterior))
+scaled_likelihood = likelihood * ymax / max(likelihood)
+
+plot(theta, prior, type='l', col='red', xlim= range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
+par(new=T)
+plot(theta, scaled_likelihood, type='l', col='blue', xlim=range(theta), ylim=c(0, ymax), ylab='',  yaxt='n',lwd=3, frame.plot = FALSE)
+par(new=T)
+plot(theta, posterior, type='l', col='seagreen', xlim=range(theta), ylim=c(0, ymax), ylab='', yaxt='n',lwd=3, frame.plot = FALSE)
+legend("topleft", c("prior", "scaled likelihood", "posterior"), lty=1, col=c("red", " blue", "green"),lwd=3,  bty = "n")
+
+qnorm(c(0.025,0.975), 132.8483, .1132108)
+```
+
+```{r}
+library(rjags)
+Nrep = 10000
+Nchains = 3
+
+# data
+# data has already been loaded in previous code
+
+# model
+model_string <- "model{
+
+  # Likelihood
+  for (i in 1:n){
+    x[i] ~ dnorm(theta, 1 / sigma ^ 2)
+  }
+  sigma <-   34.24728
+  
+  #OR simply dnorm(theta, n / sigma ^ 2)
+  
+
+  # Prior
+  theta ~ dnorm(mu0, 1 / tau0 ^ 2)
+  mu0 <- 100
+  tau0 <- 10
+
+}"
+
+# Compile the model
+dataList = list(x=x, n=n)
+
+model <- jags.model(textConnection(model_string), 
+                    data=dataList,
+                    n.chains=Nchains)
+
+
+## --------------------------------
+update(model, 1000, progress.bar="none")
+
+posterior_sample <- coda.samples(model, 
+                                 variable.names=c("theta"),
+                                 n.iter=Nrep,
+                                 progress.bar="none")
+# Summarize and check diagnostics
+summary(posterior_sample)
+
+
+## --------------------------------
+plot(posterior_sample)
+```
+#
+```{r}
+## ---- fig.height=3---------------
+theta_sim = rnorm(100000, mu_n, tau_n)
+x_sim = rnorm(100000, theta_sim, sigma)
+hist(x_sim, freq = FALSE, breaks = 30,
+ xlab = "Non- Diabetic Blood Glucose Level",
+ main = "Posterior predictive distribution")
+```
+# This interval suggests that we are 95% confident that the glucose levels of a diabetic will fall between 65.90 and 200.03 mg/dL.
+```{r}
+## --------------------------------
+quantile(x_sim, c(0.025, 0.975))
+
+
+## --------------------------------
+(sum(x < quantile(x_sim, 0.025)) + sum(x > quantile(x_sim, 0.975))) / n
+
+```
+
+# We use a Beta-Binomial Model
 
 ```{r}
 library('dplyr')
@@ -20,10 +335,7 @@ data <- data %>%
 head(data)
 ```
 
-
-# We use a Beta-Binomial Model
-
-+ The choice of alpha and beta is 3 because our prior belief is that theta is 0.5 for all the groups. A randomly chosen person, regardless of any group has a 50 percent chance of having diabetes. 
+The choice of alpha and beta is 3 because our prior belief is that theta is 0.5 for all the groups. A randomly chosen person, regardless of any group has a 50 percent chance of having diabetes. 
 ```{r}
 categories = c('Overweight','Obesity', 'Healthy Weight', 'Underweight')
 
@@ -77,6 +389,8 @@ data %>%
 
 
 + Since we have a good amount of data, the data plays an overwhelmingly bigger role in determining the posterior distribution.
+
+
 
 
 
